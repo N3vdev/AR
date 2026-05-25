@@ -7,27 +7,24 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a14; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; color: #fff; }
-    canvas { display: block; touch-action: none; position: fixed; inset: 0; }
+    canvas { display: block; touch-action: none; position: fixed; inset: 0; z-index: 1; }
 
-    /* ── Start screen ── */
     #start-screen {
       position: fixed; inset: 0; z-index: 100;
       background: linear-gradient(160deg, #0f0c29, #302b63, #24243e);
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       gap: 22px; padding: 36px; text-align: center;
     }
-    #start-screen .coin-preview {
+    .coin-preview {
       width: 100px; height: 100px; border-radius: 50%;
       background: radial-gradient(circle at 35% 30%, #FFE566, #FFD700 40%, #C89000);
       box-shadow: 0 8px 32px rgba(255,215,0,0.45), inset 0 2px 6px rgba(255,255,255,0.4);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 44px;
+      display: flex; align-items: center; justify-content: center; font-size: 44px;
     }
-    #start-screen h1 { font-size: 34px; font-weight: 800; letter-spacing: -1px; color: #FFD700; }
-    #start-screen p  { font-size: 15px; color: rgba(255,255,255,0.65); max-width: 290px; line-height: 1.65; }
+    #start-screen h1  { font-size: 34px; font-weight: 800; color: #FFD700; }
+    #start-screen p   { font-size: 15px; color: rgba(255,255,255,0.65); max-width: 290px; line-height: 1.65; }
     #start-screen small { font-size: 12px; color: rgba(255,255,255,0.35); max-width: 290px; line-height: 1.6; }
 
-    /* ── AR overlay ── */
     #overlay {
       position: fixed; inset: 0; z-index: 10;
       display: flex; flex-direction: column;
@@ -59,15 +56,14 @@
     .btn:active   { transform: scale(0.96); }
     .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
-    #flip-btn       { display: none; }
-    #reposition-btn {
+    #flip-btn        { display: none; }
+    #reposition-btn  {
       display: none; padding: 10px 24px; font-size: 13px; font-weight: 600;
       background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25);
-      border-radius: 20px; cursor: pointer; color: #fff; backdrop-filter: blur(8px);
+      border-radius: 20px; cursor: pointer; color: #fff;
       -webkit-tap-highlight-color: transparent;
     }
 
-    /* ── Error screen ── */
     #error-screen {
       position: fixed; inset: 0; background: #0f0c29; z-index: 200;
       display: none; flex-direction: column; align-items: center; justify-content: center;
@@ -75,27 +71,32 @@
     }
     #error-screen h2 { color: #FF6B6B; font-size: 22px; }
     #error-screen p  { font-size: 14px; color: rgba(255,255,255,0.6); max-width: 300px; line-height: 1.65; }
+
+    #loading {
+      position: fixed; inset: 0; background: #0a0a14; z-index: 300;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; color: rgba(255,255,255,0.5);
+    }
   </style>
 </head>
 <body>
 
-<!-- ── Start screen ── -->
-<div id="start-screen">
+<div id="loading">Loading 3D engine…</div>
+
+<div id="start-screen" style="display:none">
   <div class="coin-preview">🪙</div>
   <h1>AR Coin Flip</h1>
   <p>Flip a 3D coin on any real flat surface — table, floor, desk. No markers needed.</p>
   <button class="btn" id="start-btn">Start AR</button>
-  <small>Requires Chrome on Android 10+ or Safari iOS 15.4+.<br>Allow camera access when prompted.</small>
+  <small>Requires Chrome on Android 10+, or Safari iOS 15.4+.<br>Allow camera access when prompted.</small>
 </div>
 
-<!-- ── Error screen ── -->
 <div id="error-screen">
   <h2>AR Not Supported</h2>
   <p id="error-msg"></p>
-  <button class="btn" onclick="showScreen('start')">Go Back</button>
+  <button class="btn" id="back-btn">Go Back</button>
 </div>
 
-<!-- ── In-AR overlay ── -->
 <div id="overlay">
   <div id="status">Move your phone slowly to scan a surface</div>
   <div id="bottom">
@@ -106,336 +107,385 @@
   </div>
 </div>
 
-<script type="module">
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
+<!-- Three.js global (UMD build — no module import needed) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 
-/* ── DOM refs ── */
-const startScreen   = document.getElementById('start-screen');
-const errorScreen   = document.getElementById('error-screen');
-const errorMsg      = document.getElementById('error-msg');
-const statusEl      = document.getElementById('status');
-const resultEl      = document.getElementById('result');
-const flipBtn       = document.getElementById('flip-btn');
-const repositionBtn = document.getElementById('reposition-btn');
-const hCountEl      = document.getElementById('h-count');
-const tCountEl      = document.getElementById('t-count');
+<script>
+// Wait for Three.js to be available before setting up the app
+window.addEventListener('load', function() {
+  if (typeof THREE === 'undefined') {
+    document.getElementById('loading').textContent = 'Failed to load 3D engine. Check your internet connection.';
+    return;
+  }
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('start-screen').style.display = 'flex';
+  initApp();
+});
 
-document.getElementById('start-btn').addEventListener('click', startAR);
-flipBtn.addEventListener('click', flipCoin);
-repositionBtn.addEventListener('click', repositionCoin);
+function initApp() {
+  /* ── DOM refs ── */
+  var startScreen   = document.getElementById('start-screen');
+  var errorScreen   = document.getElementById('error-screen');
+  var errorMsgEl    = document.getElementById('error-msg');
+  var statusEl      = document.getElementById('status');
+  var resultEl      = document.getElementById('result');
+  var flipBtn       = document.getElementById('flip-btn');
+  var repositionBtn = document.getElementById('reposition-btn');
+  var hCountEl      = document.getElementById('h-count');
+  var tCountEl      = document.getElementById('t-count');
 
-/* ── Scene state ── */
-let renderer, scene, camera;
-let reticle, coinGroup;
-let hitTestSource = null;
-let xrSession     = null;
-let coinPlaced    = false;
-let isFlipping    = false;
-let normRotX      = 0;
-let headsCount    = 0;
-let tailsCount    = 0;
+  document.getElementById('start-btn').addEventListener('click', startAR);
+  document.getElementById('back-btn').addEventListener('click', function() { showScreen('start'); });
+  flipBtn.addEventListener('click', flipCoin);
+  repositionBtn.addEventListener('click', repositionCoin);
 
-const flip = {
-  active: false, startTime: 0, duration: 1100,
-  startRotX: 0, endRotX: 0, startY: 0, isHeads: false
-};
+  /* ── Scene globals ── */
+  var renderer, scene, camera;
+  var reticle, coinGroup;
+  var hitTestSource = null;
+  var xrSession     = null;
+  var coinPlaced    = false;
+  var isFlipping    = false;
+  var normRotX      = 0;
+  var headsCount    = 0;
+  var tailsCount    = 0;
 
-/* ═══════════════════════════════
-   AR startup
-═══════════════════════════════ */
-async function startAR() {
-  if (!navigator.xr)
-    return showError('WebXR is not available. Open this page in Chrome on Android, or Safari on iOS 15.4+.');
+  var flip = {
+    active: false, startTime: 0, duration: 1100,
+    startRotX: 0, endRotX: 0, startY: 0, isHeads: false
+  };
 
-  let supported = false;
-  try { supported = await navigator.xr.isSessionSupported('immersive-ar'); }
-  catch(e) { return showError('Could not check AR support: ' + e.message); }
+  /* ── Screen helper ── */
+  function showScreen(which) {
+    startScreen.style.display = which === 'start' ? 'flex' : 'none';
+    errorScreen.style.display = which === 'error' ? 'flex' : 'none';
+  }
 
-  if (!supported)
-    return showError('Immersive AR not supported on this device. Try Chrome 81+ on Android 10+, or Safari iOS 15.4+.');
+  function showError(msg) {
+    errorMsgEl.textContent = msg;
+    showScreen('error');
+  }
 
-  showScreen(null);
-  init3D();
+  /* ════════════════════════════════
+     AR startup
+  ════════════════════════════════ */
+  async function startAR() {
+    if (!navigator.xr) {
+      return showError('WebXR not found. Open this page in Chrome on Android 10+, or Safari iOS 15.4+. Also make sure you\'re on HTTPS or localhost — file:// won\'t work.');
+    }
 
-  try {
-    xrSession = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['hit-test'],
-      optionalFeatures: ['dom-overlay'],
-      domOverlay: { root: document.body }
-    });
-  } catch(e) {
+    var supported = false;
+    try {
+      supported = await navigator.xr.isSessionSupported('immersive-ar');
+    } catch(e) {
+      return showError('Could not check AR support: ' + e.message);
+    }
+
+    if (!supported) {
+      return showError('Immersive AR is not supported on this device or browser. Try Chrome 81+ on Android 10+, or Safari iOS 15.4+.');
+    }
+
+    showScreen(null);
+    init3D();
+
+    try {
+      xrSession = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test'],
+        optionalFeatures: ['dom-overlay'],
+        domOverlay: { root: document.body }
+      });
+    } catch(e) {
+      cleanupRenderer();
+      return showError('Could not start AR session: ' + e.message);
+    }
+
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(xrSession);
+    xrSession.addEventListener('end', onSessionEnd);
+
+    try {
+      var viewerSpace   = await xrSession.requestReferenceSpace('viewer');
+      hitTestSource     = await xrSession.requestHitTestSource({ space: viewerSpace });
+    } catch(e) {
+      showError('Hit testing failed: ' + e.message);
+      xrSession.end();
+      return;
+    }
+
+    xrSession.addEventListener('select', onSelect);
+    renderer.setAnimationLoop(render);
+  }
+
+  function onSessionEnd() {
+    if (hitTestSource) { try { hitTestSource.cancel(); } catch(e) {} hitTestSource = null; }
+    coinPlaced = false;
+    isFlipping = false;
+    flip.active = false;
+    if (coinGroup) coinGroup.visible = false;
+    if (reticle)   reticle.visible   = false;
+    flipBtn.style.display       = 'none';
+    repositionBtn.style.display = 'none';
+    resultEl.classList.remove('show');
+    if (renderer) renderer.setAnimationLoop(null);
+    showScreen('start');
+  }
+
+  /* ════════════════════════════════
+     Three.js scene
+  ════════════════════════════════ */
+  function init3D() {
     cleanupRenderer();
-    return showError('Could not start AR: ' + e.message + '. Make sure the page is served over HTTPS or localhost.');
+
+    scene  = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    var sun = new THREE.DirectionalLight(0xfffbe8, 1.5);
+    sun.position.set(2, 6, 3);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    scene.add(sun);
+    var fill = new THREE.PointLight(0xFFD700, 0.7, 4);
+    fill.position.set(0, 0.8, 0);
+    scene.add(fill);
+
+    buildReticle();
+    buildCoin();
+
+    window.addEventListener('resize', onResize);
   }
 
-  renderer.xr.setReferenceSpaceType('local');
-  await renderer.xr.setSession(xrSession);
-  xrSession.addEventListener('end', onSessionEnd);
-
-  try {
-    const viewerSpace = await xrSession.requestReferenceSpace('viewer');
-    hitTestSource     = await xrSession.requestHitTestSource({ space: viewerSpace });
-  } catch(e) {
-    showError('Hit testing failed: ' + e.message);
-    xrSession.end(); return;
-  }
-
-  xrSession.addEventListener('select', onSelect);
-  renderer.setAnimationLoop(render);
-}
-
-function onSessionEnd() {
-  hitTestSource?.cancel?.();
-  hitTestSource = null;
-  coinPlaced = isFlipping = flip.active = false;
-  if (coinGroup) coinGroup.visible = false;
-  if (reticle)   reticle.visible   = false;
-  flipBtn.style.display       = 'none';
-  repositionBtn.style.display = 'none';
-  resultEl.classList.remove('show');
-  renderer.setAnimationLoop(null);
-  showScreen('start');
-}
-
-/* ═══════════════════════════════
-   Three.js scene
-═══════════════════════════════ */
-function init3D() {
-  cleanupRenderer();
-  scene  = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(devicePixelRatio);
-  renderer.setSize(innerWidth, innerHeight);
-  renderer.xr.enabled = true;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
-  document.body.appendChild(renderer.domElement);
-
-  // Lights
-  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-  const sun = new THREE.DirectionalLight(0xfffbe8, 1.5);
-  sun.position.set(2, 6, 3);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  scene.add(sun);
-  const fill = new THREE.PointLight(0xFFD700, 0.7, 4);
-  fill.position.set(0, 0.8, 0);
-  scene.add(fill);
-
-  buildReticle();
-  buildCoin();
-
-  window.addEventListener('resize', () => {
-    camera.aspect = innerWidth / innerHeight;
+  function onResize() {
+    if (!camera || !renderer) return;
+    camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
-  });
-}
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
 
-function cleanupRenderer() {
-  if (renderer) { renderer.dispose(); renderer.domElement?.remove(); renderer = null; }
-}
-
-function buildReticle() {
-  const geo = new THREE.RingGeometry(0.07, 0.09, 36);
-  geo.rotateX(-Math.PI / 2);
-  reticle = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    color: 0xFFD700, side: THREE.DoubleSide, transparent: true, opacity: 0.8
-  }));
-  reticle.matrixAutoUpdate = false;
-  reticle.visible = false;
-  scene.add(reticle);
-
-  const dot = new THREE.Mesh(
-    new THREE.CircleGeometry(0.012, 16),
-    new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.9 })
-  );
-  dot.geometry.rotateX(-Math.PI / 2);
-  reticle.add(dot);
-}
-
-function buildCoin() {
-  coinGroup = new THREE.Group();
-  coinGroup.visible = false;
-  scene.add(coinGroup);
-
-  const R = 0.055, H = 0.008;
-  const goldMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.92, roughness: 0.12 });
-  const rimMat  = new THREE.MeshStandardMaterial({ color: 0xC89000, metalness: 0.96, roughness: 0.05 });
-
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, H, 72), goldMat);
-  body.castShadow = true;
-  coinGroup.add(body);
-
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(R, 0.004, 8, 72), rimMat);
-  rim.rotation.x = Math.PI / 2;
-  coinGroup.add(rim);
-
-  const faceGeo = new THREE.CircleGeometry(R - 0.004, 72);
-
-  const headsDisc = new THREE.Mesh(faceGeo,
-    new THREE.MeshStandardMaterial({ map: makeFaceTex('HEADS', '♔', '#FFC300', '#7A500A'), metalness: 0.7, roughness: 0.2 }));
-  headsDisc.rotation.x = -Math.PI / 2;
-  headsDisc.position.y = H / 2 + 0.0002;
-  coinGroup.add(headsDisc);
-
-  const tailsDisc = new THREE.Mesh(faceGeo.clone(),
-    new THREE.MeshStandardMaterial({ map: makeFaceTex('TAILS', '♛', '#C8820A', '#4A2800'), metalness: 0.7, roughness: 0.2 }));
-  tailsDisc.rotation.x = Math.PI / 2;
-  tailsDisc.position.y = -(H / 2 + 0.0002);
-  coinGroup.add(tailsDisc);
-
-  // Shadow catcher
-  const shadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.4, 0.4),
-    new THREE.ShadowMaterial({ opacity: 0.4 })
-  );
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = -(H / 2 + 0.001);
-  shadow.receiveShadow = true;
-  coinGroup.add(shadow);
-}
-
-function makeFaceTex(label, symbol, bg, fg) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 512;
-  const ctx = c.getContext('2d');
-
-  ctx.fillStyle = bg;
-  ctx.beginPath(); ctx.arc(256, 256, 256, 0, Math.PI * 2); ctx.fill();
-
-  ctx.strokeStyle = fg + '55'; ctx.lineWidth = 10;
-  ctx.beginPath(); ctx.arc(256, 256, 190, 0, Math.PI * 2); ctx.stroke();
-
-  ctx.fillStyle = fg;
-  ctx.font = 'bold 140px serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(symbol, 256, 220);
-
-  ctx.font = 'bold 52px -apple-system, sans-serif';
-  ctx.fillText(label, 256, 385);
-
-  return new THREE.CanvasTexture(c);
-}
-
-/* ═══════════════════════════════
-   Interaction
-═══════════════════════════════ */
-function onSelect() {
-  if (!reticle.visible) return;
-  coinGroup.position.setFromMatrixPosition(reticle.matrix);
-  coinGroup.position.y += 0.005;
-  coinGroup.rotation.x  = normRotX;
-  coinGroup.visible     = true;
-  coinPlaced            = true;
-  reticle.visible       = false;
-  statusEl.textContent  = 'Tap "Flip Coin" to flip!';
-  flipBtn.style.display       = 'block';
-  repositionBtn.style.display = 'block';
-}
-
-function repositionCoin() {
-  coinPlaced = isFlipping = flip.active = false;
-  coinGroup.visible     = false;
-  reticle.visible       = false;
-  flipBtn.style.display       = 'none';
-  repositionBtn.style.display = 'none';
-  resultEl.classList.remove('show');
-  statusEl.textContent = 'Move phone to detect a surface';
-}
-
-function flipCoin() {
-  if (isFlipping || !coinPlaced) return;
-  isFlipping = true;
-  flipBtn.disabled = true;
-  resultEl.classList.remove('show');
-
-  const isHeads   = Math.random() < 0.5;
-  const spins     = Math.floor(Math.random() * 3) + 4;
-  const landAngle = isHeads ? 0 : Math.PI;
-  const current   = ((normRotX % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-  const delta     = Math.PI * 2 * spins + ((landAngle - current + Math.PI * 2) % (Math.PI * 2));
-
-  flip.active    = true;
-  flip.startTime = performance.now();
-  flip.startRotX = normRotX;
-  flip.endRotX   = normRotX + delta;
-  flip.startY    = coinGroup.position.y;
-  flip.isHeads   = isHeads;
-
-  playFlipSound();
-}
-
-/* ═══════════════════════════════
-   Render loop
-═══════════════════════════════ */
-function render(timestamp, frame) {
-  if (!frame) return;
-
-  // Surface detection
-  if (!coinPlaced && hitTestSource) {
-    const refSpace = renderer.xr.getReferenceSpace();
-    const hits     = frame.getHitTestResults(hitTestSource);
-    if (hits.length > 0) {
-      reticle.matrix.fromArray(hits[0].getPose(refSpace).transform.matrix);
-      reticle.visible      = true;
-      statusEl.textContent = '👆 Tap to place coin here';
-    } else {
-      reticle.visible      = false;
-      statusEl.textContent = 'Slowly scan a flat surface…';
+  function cleanupRenderer() {
+    window.removeEventListener('resize', onResize);
+    if (renderer) {
+      renderer.dispose();
+      if (renderer.domElement && renderer.domElement.parentNode) {
+        renderer.domElement.parentNode.removeChild(renderer.domElement);
+      }
+      renderer = null;
     }
   }
 
-  // Flip animation
-  if (flip.active) {
-    const progress = Math.min((timestamp - flip.startTime) / flip.duration, 1);
-    coinGroup.position.y = flip.startY + 0.22 * Math.sin(progress * Math.PI);
-    coinGroup.rotation.x = flip.startRotX + (flip.endRotX - flip.startRotX) * (1 - Math.pow(1 - progress, 3));
+  function buildReticle() {
+    var geo = new THREE.RingGeometry(0.07, 0.09, 36);
+    geo.rotateX(-Math.PI / 2);
+    reticle = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: 0xFFD700, side: THREE.DoubleSide, transparent: true, opacity: 0.8
+    }));
+    reticle.matrixAutoUpdate = false;
+    reticle.visible = false;
+    scene.add(reticle);
 
-    if (progress >= 1) {
-      flip.active          = false;
-      coinGroup.position.y = flip.startY;
-      coinGroup.rotation.x = flip.endRotX;
-      normRotX             = flip.endRotX;
-
-      if (flip.isHeads) { headsCount++; hCountEl.textContent = headsCount; resultEl.textContent = '🪙 HEADS!'; }
-      else              { tailsCount++; tCountEl.textContent = tailsCount; resultEl.textContent = '🎭 TAILS!'; }
-
-      resultEl.classList.add('show');
-      flipBtn.disabled = false;
-      isFlipping       = false;
-    }
+    var dot = new THREE.Mesh(
+      new THREE.CircleGeometry(0.012, 16),
+      new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.9 })
+    );
+    dot.geometry.rotateX(-Math.PI / 2);
+    reticle.add(dot);
   }
 
-  renderer.render(scene, camera);
-}
+  function buildCoin() {
+    coinGroup = new THREE.Group();
+    coinGroup.visible = false;
+    scene.add(coinGroup);
 
-/* ═══════════════════════════════
-   Helpers
-═══════════════════════════════ */
-function showScreen(which) {
-  startScreen.style.display = which === 'start' ? 'flex' : 'none';
-  errorScreen.style.display = which === 'error' ? 'flex' : 'none';
-}
-window.showScreen = showScreen;
+    var R = 0.055, H = 0.008;
+    var goldMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.92, roughness: 0.12 });
+    var rimMat  = new THREE.MeshStandardMaterial({ color: 0xC89000, metalness: 0.96, roughness: 0.05 });
 
-function playFlipSound() {
-  try {
-    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
-    const dur  = 0.35, sr = ctx.sampleRate;
-    const buf  = ctx.createBuffer(1, sr * dur, sr);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < data.length; i++)
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-(i / sr) / 0.06);
-    const src = ctx.createBufferSource(); src.buffer = buf;
-    const bp  = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3500; bp.Q.value = 1.2;
-    const g   = ctx.createGain();         g.gain.setValueAtTime(0.4, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-    src.connect(bp); bp.connect(g); g.connect(ctx.destination); src.start();
-  } catch(e) {}
-}
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, H, 72), goldMat);
+    body.castShadow = true;
+    coinGroup.add(body);
+
+    var rim = new THREE.Mesh(new THREE.TorusGeometry(R, 0.004, 8, 72), rimMat);
+    rim.rotation.x = Math.PI / 2;
+    coinGroup.add(rim);
+
+    var faceGeo = new THREE.CircleGeometry(R - 0.004, 72);
+
+    var headsDisc = new THREE.Mesh(
+      faceGeo,
+      new THREE.MeshStandardMaterial({ map: makeFaceTex('HEADS', '♔', '#FFC300', '#7A500A'), metalness: 0.7, roughness: 0.2 })
+    );
+    headsDisc.rotation.x = -Math.PI / 2;
+    headsDisc.position.y = H / 2 + 0.0002;
+    coinGroup.add(headsDisc);
+
+    var tailsDisc = new THREE.Mesh(
+      faceGeo.clone(),
+      new THREE.MeshStandardMaterial({ map: makeFaceTex('TAILS', '♛', '#C8820A', '#4A2800'), metalness: 0.7, roughness: 0.2 })
+    );
+    tailsDisc.rotation.x = Math.PI / 2;
+    tailsDisc.position.y = -(H / 2 + 0.0002);
+    coinGroup.add(tailsDisc);
+
+    var shadowCatcher = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.4, 0.4),
+      new THREE.ShadowMaterial({ opacity: 0.4 })
+    );
+    shadowCatcher.rotation.x = -Math.PI / 2;
+    shadowCatcher.position.y = -(H / 2 + 0.001);
+    shadowCatcher.receiveShadow = true;
+    coinGroup.add(shadowCatcher);
+  }
+
+  function makeFaceTex(label, symbol, bg, fg) {
+    var c = document.createElement('canvas');
+    c.width = c.height = 512;
+    var ctx = c.getContext('2d');
+
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.arc(256, 256, 256, 0, Math.PI * 2); ctx.fill();
+
+    ctx.strokeStyle = fg + '55'; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.arc(256, 256, 190, 0, Math.PI * 2); ctx.stroke();
+
+    ctx.fillStyle = fg;
+    ctx.font = 'bold 140px serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(symbol, 256, 220);
+
+    ctx.font = 'bold 52px sans-serif';
+    ctx.fillText(label, 256, 385);
+
+    return new THREE.CanvasTexture(c);
+  }
+
+  /* ════════════════════════════════
+     Interaction
+  ════════════════════════════════ */
+  function onSelect() {
+    if (!reticle.visible) return;
+    var m = new THREE.Matrix4().fromArray(reticle.matrix.elements);
+    coinGroup.position.setFromMatrixPosition(m);
+    coinGroup.position.y += 0.005;
+    coinGroup.rotation.x  = normRotX;
+    coinGroup.visible     = true;
+    coinPlaced            = true;
+    reticle.visible       = false;
+    statusEl.textContent  = 'Tap "Flip Coin" to flip!';
+    flipBtn.style.display       = 'block';
+    repositionBtn.style.display = 'block';
+  }
+
+  function repositionCoin() {
+    coinPlaced  = false;
+    isFlipping  = false;
+    flip.active = false;
+    coinGroup.visible           = false;
+    reticle.visible             = false;
+    flipBtn.style.display       = 'none';
+    repositionBtn.style.display = 'none';
+    resultEl.classList.remove('show');
+    statusEl.textContent = 'Move phone to detect a surface';
+  }
+
+  function flipCoin() {
+    if (isFlipping || !coinPlaced) return;
+    isFlipping       = true;
+    flipBtn.disabled = true;
+    resultEl.classList.remove('show');
+
+    var isHeads   = Math.random() < 0.5;
+    var spins     = Math.floor(Math.random() * 3) + 4;
+    var landAngle = isHeads ? 0 : Math.PI;
+    var current   = ((normRotX % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    var delta     = Math.PI * 2 * spins + ((landAngle - current + Math.PI * 2) % (Math.PI * 2));
+
+    flip.active    = true;
+    flip.startTime = performance.now();
+    flip.startRotX = normRotX;
+    flip.endRotX   = normRotX + delta;
+    flip.startY    = coinGroup.position.y;
+    flip.isHeads   = isHeads;
+
+    playFlipSound();
+  }
+
+  /* ════════════════════════════════
+     Render loop
+  ════════════════════════════════ */
+  function render(timestamp, frame) {
+    if (!frame) return;
+
+    if (!coinPlaced && hitTestSource) {
+      var refSpace = renderer.xr.getReferenceSpace();
+      var hits     = frame.getHitTestResults(hitTestSource);
+      if (hits.length > 0) {
+        reticle.matrix.fromArray(hits[0].getPose(refSpace).transform.matrix);
+        reticle.visible      = true;
+        statusEl.textContent = '👆 Tap to place coin here';
+      } else {
+        reticle.visible      = false;
+        statusEl.textContent = 'Slowly scan a flat surface…';
+      }
+    }
+
+    if (flip.active) {
+      var progress = Math.min((timestamp - flip.startTime) / flip.duration, 1);
+      coinGroup.position.y = flip.startY + 0.22 * Math.sin(progress * Math.PI);
+      coinGroup.rotation.x = flip.startRotX + (flip.endRotX - flip.startRotX) * (1 - Math.pow(1 - progress, 3));
+
+      if (progress >= 1) {
+        flip.active          = false;
+        coinGroup.position.y = flip.startY;
+        coinGroup.rotation.x = flip.endRotX;
+        normRotX             = flip.endRotX;
+
+        if (flip.isHeads) {
+          headsCount++;
+          hCountEl.textContent = headsCount;
+          resultEl.textContent = '🪙 HEADS!';
+        } else {
+          tailsCount++;
+          tCountEl.textContent = tailsCount;
+          resultEl.textContent = '🎭 TAILS!';
+        }
+
+        resultEl.classList.add('show');
+        flipBtn.disabled = false;
+        isFlipping       = false;
+      }
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  /* ════════════════════════════════
+     Audio
+  ════════════════════════════════ */
+  function playFlipSound() {
+    try {
+      var ctx  = new (window.AudioContext || window.webkitAudioContext)();
+      var dur  = 0.35, sr = ctx.sampleRate;
+      var buf  = ctx.createBuffer(1, Math.floor(sr * dur), sr);
+      var data = buf.getChannelData(0);
+      for (var i = 0; i < data.length; i++)
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-(i / sr) / 0.06);
+      var src = ctx.createBufferSource(); src.buffer = buf;
+      var bp  = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3500; bp.Q.value = 1.2;
+      var g   = ctx.createGain();         g.gain.setValueAtTime(0.4, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      src.connect(bp); bp.connect(g); g.connect(ctx.destination); src.start();
+    } catch(e) {}
+  }
+
+} // end initApp
 </script>
 </body>
 </html>
