@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AR Coin Flip</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #000; }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 999;
+      padding: 24px 20px;
+      pointer-events: none;
+    }
+
+    #status {
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      padding: 8px 18px;
+      border-radius: 24px;
+      font-size: 13px;
+      text-align: center;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+
+    #bottom {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      pointer-events: all;
+    }
+
+    #score {
+      color: rgba(255,255,255,0.85);
+      font-size: 14px;
+      letter-spacing: 0.5px;
+      text-shadow: 0 1px 6px rgba(0,0,0,0.8);
+    }
+    #score b { font-size: 17px; color: #FFD700; }
+
+    #result {
+      font-size: 30px;
+      font-weight: 800;
+      color: #fff;
+      text-shadow: 0 2px 14px rgba(0,0,0,1), 0 0 30px rgba(255,215,0,0.6);
+      min-height: 44px;
+      letter-spacing: 1px;
+      transition: opacity 0.25s;
+    }
+
+    #flip-btn {
+      padding: 18px 60px;
+      font-size: 20px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #FFD700 0%, #FF8C00 100%);
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      color: #1a1000;
+      letter-spacing: 0.3px;
+      box-shadow: 0 6px 28px rgba(255,165,0,0.55), 0 2px 0 rgba(0,0,0,0.2) inset;
+      transition: transform 0.12s, box-shadow 0.12s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #flip-btn:hover  { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(255,165,0,0.65); }
+    #flip-btn:active { transform: scale(0.96); }
+    #flip-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Marker help panel */
+    #marker-help {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.82);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      color: #fff;
+      padding: 30px;
+      text-align: center;
+      gap: 16px;
+    }
+    #marker-help h2 { font-size: 22px; color: #FFD700; }
+    #marker-help p  { font-size: 14px; color: rgba(255,255,255,0.75); max-width: 320px; line-height: 1.6; }
+    #marker-img { width: 160px; height: 160px; border: 4px solid #FFD700; border-radius: 8px; background: #fff; }
+    #marker-help button {
+      margin-top: 8px;
+      padding: 14px 40px;
+      background: #FFD700;
+      border: none;
+      border-radius: 30px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      color: #1a1000;
+    }
+  </style>
+
+  <!-- A-Frame & AR.js via CDN — no build step needed -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.5/aframe/build/aframe-ar.js"></script>
+</head>
+<body>
+
+  <!-- Marker help splash -->
+  <div id="marker-help">
+    <h2>AR Coin Flip</h2>
+    <!-- The Hiro marker rendered as inline SVG so no extra file needed -->
+    <img id="marker-img"
+      src="https://raw.githack.com/AR-js-org/AR.js/master/data/images/hiro.png"
+      alt="Hiro marker"
+      onerror="this.src='https://jeromeetienne.github.io/AR.js/data/images/hiro.png'"
+    >
+    <p>Print or display this <strong>Hiro marker</strong> on another screen.<br>
+       Point your camera at it — the 3D coin will appear in AR!</p>
+    <button onclick="document.getElementById('marker-help').style.display='none'">
+      Got it, let's go! &nbsp;🪙
+    </button>
+  </div>
+
+  <!-- HUD overlay -->
+  <div id="overlay">
+    <div id="status">📷 Point camera at the Hiro marker</div>
+    <div id="bottom">
+      <div id="score">Heads: <b id="h-count">0</b> &nbsp;&nbsp; Tails: <b id="t-count">0</b></div>
+      <div id="result"></div>
+      <button id="flip-btn" onclick="flipCoin()">🪙 &nbsp;Flip Coin</button>
+    </div>
+  </div>
+
+  <!-- AR Scene -->
+  <a-scene
+    embedded
+    arjs="sourceType: webcam; debugUIEnabled: false; trackingMethod: best;"
+    vr-mode-ui="enabled: false"
+    renderer="logarithmicDepthBuffer: true; precision: medium; antialias: true;"
+    loading-screen="enabled: false"
+  >
+    <!-- Lighting -->
+    <a-entity light="type: ambient; color: #ffffff; intensity: 0.55"></a-entity>
+    <a-entity light="type: directional; color: #fffbe8; intensity: 1.3; castShadow: true" position="2 5 3"></a-entity>
+    <a-entity light="type: point; color: #FFD700; intensity: 0.6; distance: 4" position="0 2 0"></a-entity>
+
+    <a-marker preset="hiro" id="hiro-marker">
+      <!-- Coin root — we animate position + rotation on this entity -->
+      <a-entity id="coin-group" position="0 0.5 0">
+
+        <!-- ── Coin body ── -->
+        <a-cylinder
+          id="coin-body"
+          radius="0.44"
+          height="0.072"
+          color="#FFD700"
+          metalness="0.92"
+          roughness="0.12"
+          shadow="cast: true; receive: false"
+        ></a-cylinder>
+
+        <!-- Rim ring -->
+        <a-torus
+          radius="0.44"
+          radius-tubular="0.036"
+          segments-tubular="40"
+          color="#C8940A"
+          metalness="0.96"
+          roughness="0.08"
+          rotation="90 0 0"
+          position="0 0 0"
+        ></a-torus>
+
+        <!-- ── HEADS face (top, y+) ── -->
+        <a-entity position="0 0.038 0" rotation="-90 0 0">
+          <a-circle radius="0.40" color="#FFC300" metalness="0.78" roughness="0.22" segments="48"></a-circle>
+          <!-- Inner circle detail -->
+          <a-circle radius="0.30" color="#E8A800" metalness="0.78" roughness="0.22" segments="48" position="0 0 0.001"></a-circle>
+          <!-- Text -->
+          <a-entity
+            text="value: HEADS; color: #7A500A; align: center; width: 0.55; font: roboto; letterSpacing: 2"
+            position="0 0.12 0.003"
+          ></a-entity>
+          <a-entity
+            text="value: ♔; color: #7A500A; align: center; width: 1.1; font: roboto"
+            position="0 -0.04 0.003"
+          ></a-entity>
+          <!-- Knurling dots ring -->
+          <a-entity id="heads-dots"></a-entity>
+        </a-entity>
+
+        <!-- ── TAILS face (bottom, y-) ── -->
+        <a-entity position="0 -0.038 0" rotation="90 0 0">
+          <a-circle radius="0.40" color="#D4920A" metalness="0.78" roughness="0.22" segments="48"></a-circle>
+          <a-circle radius="0.30" color="#C07A00" metalness="0.78" roughness="0.22" segments="48" position="0 0 0.001"></a-circle>
+          <a-entity
+            text="value: TAILS; color: #5A3800; align: center; width: 0.55; font: roboto; letterSpacing: 2"
+            position="0 0.12 0.003"
+          ></a-entity>
+          <a-entity
+            text="value: ♛; color: #5A3800; align: center; width: 1.1; font: roboto"
+            position="0 -0.04 0.003"
+          ></a-entity>
+        </a-entity>
+
+      </a-entity>
+    </a-marker>
+
+    <a-entity camera></a-entity>
+  </a-scene>
+
+  <script>
+    /* ── State ── */
+    let isFlipping   = false;
+    let headsCount   = 0;
+    let tailsCount   = 0;
+    let normRotX     = 0;   // 0 = heads-up, 180 = tails-up (normalised after each flip)
+
+    /* ── Marker events ── */
+    const marker   = document.querySelector('#hiro-marker');
+    const statusEl = document.getElementById('status');
+
+    marker.addEventListener('markerFound', () => {
+      statusEl.textContent = '✅ Coin detected — tap Flip!';
+    });
+    marker.addEventListener('markerLost', () => {
+      statusEl.textContent = '📷 Point camera at the Hiro marker';
+    });
+
+    /* ── Tap the coin directly ── */
+    document.querySelector('#coin-group').addEventListener('click', flipCoin);
+
+    /* ── Main flip logic ── */
+    function flipCoin() {
+      if (isFlipping) return;
+      isFlipping = true;
+
+      const btn      = document.getElementById('flip-btn');
+      const resultEl = document.getElementById('result');
+      const group    = document.querySelector('#coin-group');
+
+      btn.disabled       = true;
+      resultEl.style.opacity = '0';
+
+      const isHeads    = Math.random() < 0.5;
+      const extraSpins = Math.floor(Math.random() * 3) + 4;   // 4–6 full 360° rotations
+      const landAngle  = isHeads ? 0 : 180;
+      const totalDelta = 360 * extraSpins + (landAngle - normRotX);
+      const toRotX     = normRotX + totalDelta;
+
+      const FLIP_DUR   = 900;  // ms
+
+      /* Up */
+      group.setAttribute('animation__up', {
+        property : 'position',
+        from      : '0 0.5 0',
+        to        : '0 1.15 0',
+        dur       : 380,
+        easing    : 'easeOutQuad'
+      });
+      /* Down */
+      group.setAttribute('animation__dn', {
+        property  : 'position',
+        from      : '0 1.15 0',
+        to        : '0 0.5 0',
+        dur       : 560,
+        easing    : 'easeInQuad',
+        delay     : 380
+      });
+      /* Spin (tumble around X = edge-over-edge flip) */
+      group.setAttribute('animation__spin', {
+        property  : 'rotation',
+        from      : `${normRotX} 0 0`,
+        to        : `${toRotX} 0 0`,
+        dur       : FLIP_DUR,
+        easing    : 'easeOutCubic'
+      });
+
+      playFlipSound();
+
+      setTimeout(() => {
+        /* Normalise rotation so numbers don't grow forever */
+        normRotX = landAngle;
+        group.setAttribute('rotation', `${landAngle} 0 0`);
+
+        if (isHeads) {
+          headsCount++;
+          document.getElementById('h-count').textContent = headsCount;
+          resultEl.textContent = '🪙  HEADS!';
+        } else {
+          tailsCount++;
+          document.getElementById('t-count').textContent = tailsCount;
+          resultEl.textContent = '🎭  TAILS!';
+        }
+
+        resultEl.style.opacity = '1';
+        btn.disabled  = false;
+        isFlipping    = false;
+      }, FLIP_DUR + 50);
+    }
+
+    /* ── Procedural coin-flip whoosh via Web Audio ── */
+    function playFlipSound() {
+      try {
+        const ctx    = new (window.AudioContext || window.webkitAudioContext)();
+        const sr     = ctx.sampleRate;
+        const dur    = 0.35;
+        const buf    = ctx.createBuffer(1, sr * dur, sr);
+        const data   = buf.getChannelData(0);
+
+        for (let i = 0; i < data.length; i++) {
+          const t = i / sr;
+          const env = Math.exp(-t / 0.06) + 0.15 * Math.exp(-t / 0.25);
+          data[i] = (Math.random() * 2 - 1) * env;
+        }
+
+        const src    = ctx.createBufferSource();
+        src.buffer   = buf;
+
+        const bp     = ctx.createBiquadFilter();
+        bp.type      = 'bandpass';
+        bp.frequency.value = 3500;
+        bp.Q.value   = 1.2;
+
+        const gain   = ctx.createGain();
+        gain.gain.setValueAtTime(0.45, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+
+        src.connect(bp);
+        bp.connect(gain);
+        gain.connect(ctx.destination);
+        src.start();
+      } catch (e) { /* silently ignore if audio not available */ }
+    }
+  </script>
+</body>
+</html>
