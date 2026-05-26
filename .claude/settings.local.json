@@ -5,7 +5,9 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebSearch",
       "WebFetch(domain:ar-js-org.github.io)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:cdnjs.cloudflare.com)",
+      "WebFetch(domain:hiukim.github.io)"
     ]
   }
 }
